@@ -1,0 +1,12 @@
+{ 
+		"bam" : "/home/cmb-16/mjc/mchaisso/projects/PartAsm/HG00514.chr22.bam",
+    "working_dir" : "/home/cmb-16/mjc/mchaisso/projects/PartAsm/working",
+    "sample" : "HG00514",
+    "ref" : "/home/cmb-16/mjc/mchaisso/projects/PartAsm/chr22.fasta",
+    "vcf" : "/home/cmb-16/mjc/projects/hgsvg/analysis/HG00514/Phasing/SH032.wgs.whatshap.strandseq-10X.20160704.phased-genotypes.vcf.gz",
+		"grid_large" : "sbatch -c 16 --mem=32G --time=24:00:00 --partition=cmb",
+		"grid_manycore" : "sbatch -c 16 --mem=8G --time=24:00:00 --partition=cmb",
+		"grid_medium" : "sbatch -c 4 --mem=6G --time=24:00:00 --partition=cmb",
+		"grid_small" : "sbatch -c 1 --mem=1G --time=4:00:00 --partition=cmb",
+		"grid_blat" : "sbatch -c 1 --mem=6G --time=24:00:00 --partition=cmb"
+}
