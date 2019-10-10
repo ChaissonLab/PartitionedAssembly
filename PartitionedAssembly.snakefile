@@ -14,7 +14,12 @@ haps=["1", "2"]
 ref=config["ref"]
 
 fai = open(ref + ".fai")
-chroms = [l.strip().split()[0] for l in fai ]
+allChroms = [l.strip().split()[0] for l in fai ]
+chroms = []
+for chrom in allChroms:
+    if chrom != "chrM" and chrom != "chrY":
+        chroms.append(chrom)
+
 
 rule all:
     input:
@@ -68,6 +73,7 @@ gs=`cat {params.ref}.fai | awk -vc={wildcards.chrom} '{{ if ($1 == c) print $2;}
 /home/cmb-16/mjc/shared/software_packages/wtdbg2/wtdbg2 -x sq -t 16 -g$gs  -i {input.hapFasta} -fo {output.asm} -L5000
 /home/cmb-16/mjc/shared/software_packages/wtdbg2/wtpoa-cns -t 16 -i {output.asm}.ctg.lay.gz -o {output.asm}
 samtools faidx {output.asm}
+rm -f {output.asm}.*.gz {output.asm}.*.frg.*
 """
 
 rule RemapBam:
