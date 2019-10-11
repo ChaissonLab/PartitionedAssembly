@@ -37,6 +37,9 @@ rule SplitBam:
         vcf=config["vcf"]
     output:
         hapBams=temp(expand(wd + "/{{chrom}}.{hap}.bam", hap=haps)),
+    resources:
+        mem_gb=4,
+        threads=14
     params:
         grid_opts=config["grid_medium"],
         sd=SD,
@@ -44,7 +47,7 @@ rule SplitBam:
         wd=wd,
         ref=config["ref"]
     shell:"""
-samtools view -h {input.bam} {wildcards.chrom} | {params.sd}/pbgreedyphase/partitionByPhasedSNVs  --sample {params.sample} --vcf {input.vcf} --sam=/dev/stdin --h1={output.hapBams[0]} --h2={output.hapBams[1]} --phaseStats={params.wd}/{wildcards.chrom}.phase_stats --ref={params.ref}
+samtools merge - {input.bam} -R {wildcards.chrom} | samtools view -h - | {params.sd}/pbgreedyphase/partitionByPhasedSNVs  --sample {params.sample} --vcf {input.vcf} --sam=/dev/stdin --h1={output.hapBams[0]} --h2={output.hapBams[1]} --phaseStats={params.wd}/{wildcards.chrom}.phase_stats --ref={params.ref}
 """
 
 rule MakeFasta:
@@ -54,6 +57,9 @@ rule MakeFasta:
         hapFasta=temp(wd + "/{chrom}.{hap}.bam.fasta")
     params:
         grid_opts=config["grid_small"]
+    resources:
+        mem_gb=1,
+        threads=1
     shell:"""
 samtools fasta {input.hapBam} -F 2304 > {output.hapFasta}
 """
@@ -63,6 +69,9 @@ rule AssembleFasta:
         hapFasta=wd + "/{chrom}.{hap}.bam.fasta"
     output:
         asm=temp(wd + "/{chrom}.{hap}.raw_assembly.fasta")
+    resources:
+        mem_gb=lambda wildcards, attempt: (attempt+1)*16,
+        threads=16
     params:
         grid_opts=config["grid_large"],
         ref=config["ref"]
@@ -82,6 +91,9 @@ rule RemapBam:
         hapBam=wd + "/{chrom}.{hap}.bam"
     output:
         asmBam=temp(wd + "/{chrom}.{hap}.assembly.fasta.bam"),
+    resources:
+        mem_gb=lambda wildcards, attempt: attempt*16,
+        threads=16
     params:
         grid_opts=config["grid_large"]
     shell:"""
@@ -96,12 +108,24 @@ rule CallConsensus:
     input:
         asm=wd + "/{chrom}.{hap}.raw_assembly.fasta",
         asmBam=wd + "/{chrom}.{hap}.assembly.fasta.bam",
+        fasta=wd + "/{chrom}.{hap}.bam.fasta",
     output:
         cons="{chrom}.{hap}.assembly.consensus.fasta",
+    resources:
+        mem_gb=lambda wildcards, attempt: attempt*16,
+        threads=16
     params:
-        grid_opts=config["grid_manycore"]
+        grid_opts=config["grid_manycore"],
+        consMethod=config["consensus"]
     shell:"""
+if [ "{params.consMethod}" == "racon" ]; then
+    samtools view -h {input.asmBam} | gzip -c > {input.asmBam}.sam.gz
+    racon -t 16 {input.fasta} {input.asmBam}.sam.gz {input.asm} > {output.cons}
+    true
+else
 . /home/cmb-16/mjc/mchaisso/projects/phasedsv_dev/phasedsv/dep/build/bin/activate pacbio
 arrow -j 16 --referenceFilename {input.asm} --noEvidenceConsensusCall lowercasereference -o {output.cons} {input.asmBam}
+fi
 rm -rf {input.asm}.*
+
 """
