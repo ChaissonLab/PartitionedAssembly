@@ -1,6 +1,6 @@
 { 
     "bam" : ["/home/cmb-16/nobackups/mjc/sample_datasets/hgsvg/HG00514/UMD_Sequel_II/pbmm2/HG00514.PacBioSequel2.EDEVI_20190319_S64018_PL100119428-5_B01.subreads.bam.sorted.bam", "/home/cmb-16/nobackups/mjc/sample_datasets/hgsvg/HG00514/UMD_Sequel_II/pbmm2/HG00514.PacBioSequel2.EDEVI_20190321_S64018_PL100119428-5_B01.subreads.bam.sorted.bam"],
-    "working_dir" : "/home/cmb-panasas2/mchaisso/HG00514_2",
+    "working_dir" : "/home/cmb-panasas2/mchaisso/HG00514_2_flye",
     "sample" : "HG00514",
     "ref" : "/home/cmb-16/mjc/shared/references/hg38_noalts/indexes/lra/hg38.no_alts.fasta",
     "vcf" : "/home/cmb-16/mjc/projects/hgsvg/analysis/HG00514/Phasing/SH032.wgs.whatshap.strandseq-10X.20160704.phased-genotypes.vcf.gz",
@@ -9,5 +9,7 @@
 		"grid_medium" : "sbatch --time=24:00:00 --partition=cmb",
 		"grid_small" : "sbatch --time=4:00:00 --partition=cmb",
 		"grid_blat" : "sbatch --time=24:00:00 --partition=cmb",
-    "consensus" : "arrow"
+    "read-type" : "raw",
+    "consensus" : "arrow",
+    "assembler" : "flye"
 }

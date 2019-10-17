@@ -16,6 +16,14 @@ ref=config["ref"]
 fai = open(ref + ".fai")
 allChroms = [l.strip().split()[0] for l in fai ]
 chroms = []
+allowedAssemblers = ["wtdbg2", "flye"]
+
+if "assembler" not in config:
+    config["assembler"] = "wtdbg2"
+elif config["assembler"] not in allowedAssemblers:
+    print("Configuration error. The assembler must be one of " + ",".join(allowedAssemblers))
+    sys.exit(1)
+
 for chrom in allChroms:
     if chrom != "chrM" and chrom != "chrY":
         chroms.append(chrom)
@@ -28,7 +36,8 @@ rule all:
 #        assemble_part=expand(wd + "/{chrom}.{hap}.assembly.fasta", chrom=chroms,hap=haps),
 #        assemble_remap=expand(wd + "/{chrom}.{hap}.assembly.fasta.bam", chrom=chroms,hap=haps),
 #        asmBam=expand(wd + "/{chrom}.{hap}.assembly.fasta.bam", chrom=chroms,hap=haps),
-        cons=expand("{chrom}.{hap}.assembly.consensus.fasta", chrom=chroms,hap=haps)
+        cons=expand("{chrom}.{hap}.assembly.consensus.fasta", chrom=chroms,hap=haps),
+        combined=expand("assembly.{hap}.consensus.fasta", hap=haps)
 
 
 rule SplitBam:
@@ -74,15 +83,44 @@ rule AssembleFasta:
         threads=16
     params:
         grid_opts=config["grid_large"],
-        ref=config["ref"]
+        ref=config["ref"],
+        read_type=config["read-type"],
+        assembler=config["assembler"],
+        working_directory=wd
     shell:"""
 d=$(dirname {input.hapFasta})
 mkdir -p $d
-gs=`cat {params.ref}.fai | awk -vc={wildcards.chrom} '{{ if ($1 == c) print $2;}}'`
-/home/cmb-16/mjc/shared/software_packages/wtdbg2/wtdbg2 -x sq -t 16 -g$gs  -i {input.hapFasta} -fo {output.asm} -L5000
-/home/cmb-16/mjc/shared/software_packages/wtdbg2/wtpoa-cns -t 16 -i {output.asm}.ctg.lay.gz -o {output.asm}
+
+if [ "{params.assembler}" == "wtdbg2" ]; then
+  if [ "{params.read_type}" == "CCS" ]; then
+     preset=ccs
+  else
+     preset=sq
+  fi
+
+  gs=`cat {params.ref}.fai | awk -vc={wildcards.chrom} '{{ if ($1 == c) print $2;}}'`
+  /home/cmb-16/mjc/shared/software_packages/wtdbg2/wtdbg2 -x $preset -t 16 -g$gs  -i {input.hapFasta} -fo {output.asm} -L5000
+  /home/cmb-16/mjc/shared/software_packages/wtdbg2/wtpoa-cns -t 16 -i {output.asm}.ctg.lay.gz -o {output.asm}
+
+  rm -f {output.asm}.*.gz {output.asm}.*.frg.*
+fi
+if [ "{params.assembler}" == "flye" ]; then
+  
+  if [ "{params.read_type}" == "CCS" ]; then
+     readType="--pacbio-corr"
+  else
+     readType="--pacbio-raw"
+  fi
+
+  gs=`cat {params.ref}.fai | awk -vc={wildcards.chrom} '{{ if ($1 == c) print $2;}}'`
+  
+. /home/cmb-16/mjc/mchaisso/projects/phasedsv_dev/phasedsv/dep/build/bin/activate python2
+echo "read type " $readType
+/home/cmb-16/mjc/mchaisso/software/Flye/bin/flye $readType {input.hapFasta} --genome-size $gs -o {params.working_directory}/{wildcards.chrom}.{wildcards.hap}  -t 16 -i 1
+mv {params.working_directory}/{wildcards.chrom}.{wildcards.hap}/assembly.fasta {output.asm}
+fi
+
 samtools faidx {output.asm}
-rm -f {output.asm}.*.gz {output.asm}.*.frg.*
 """
 
 rule RemapBam:
@@ -116,16 +154,38 @@ rule CallConsensus:
         threads=16
     params:
         grid_opts=config["grid_manycore"],
-        consMethod=config["consensus"]
+        read_type=config["read-type"],
+        assembler=config["assembler"]
     shell:"""
-if [ "{params.consMethod}" == "racon" ]; then
+if [ ! -e {input.asmBam}.bai ]; then
+    samtools index {input.asmBam}
+fi
+if [ "{params.read_type}" == "CCS" ]; then
     samtools view -h {input.asmBam} | gzip -c > {input.asmBam}.sam.gz
     racon -t 16 {input.fasta} {input.asmBam}.sam.gz {input.asm} > {output.cons}
     true
 else
 . /home/cmb-16/mjc/mchaisso/projects/phasedsv_dev/phasedsv/dep/build/bin/activate pacbio
+
+if [ ! -e {input.asmBam}.pbi ]; then 
+    pbindex {input.asmBam}
+fi
+
 arrow -j 16 --referenceFilename {input.asm} --noEvidenceConsensusCall lowercasereference -o {output.cons} {input.asmBam}
 fi
 rm -rf {input.asm}.*
 
+"""
+
+rule CombineChromosomes:
+    input:
+        cons=expand("{chrom}.{{hap}}.assembly.consensus.fasta", chrom=chroms),
+    output:
+        combined="assembly.{hap}.consensus.fasta",
+    params:
+        allChroms=chroms
+    shell:"""
+for chrom in {params.allChroms}; do 
+  cat $chrom.{wildcards.hap}.assembly.consensus.fasta | awk -vchrom=$chrom '{{ if (substr($1,0,1) == ">") {{ print ">"chrom"/"substr($1,2); }} else {{ print;}} }}'
+done > {output.combined}
 """
