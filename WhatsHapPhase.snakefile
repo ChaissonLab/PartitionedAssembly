@@ -57,5 +57,5 @@ rule IndexVCF:
         gzvcf="{input}.wh.vcf.gz"
     shell:"""
 bgzip {input.vcf}
-tabix {input.vcf}
+tabix {input.vcf}.gz
 """

@@ -29,6 +29,8 @@ for chrom in allChroms:
         chroms.append(chrom)
 
 
+shell.prefix("set +eu ")
+
 rule all:
     input:
  #       hapBams=expand(wd + "/{chrom}.{hap}.bam", chrom=chroms,hap=haps),
@@ -88,6 +90,7 @@ rule AssembleFasta:
         assembler=config["assembler"],
         working_directory=wd
     shell:"""
+
 d=$(dirname {input.hapFasta})
 mkdir -p $d
 
@@ -135,6 +138,7 @@ rule RemapBam:
     params:
         grid_opts=config["grid_large"]
     shell:"""
+set +e
 . /home/cmb-16/mjc/mchaisso/projects/phasedsv_dev/phasedsv/dep/build/bin/activate pacbio
 pbmm2 index {input.asm} {input.asm}.mmi
 pbmm2 align {input.asm}.mmi {input.hapBam} -j 16 | samtools sort -T $TMPDIR/{wildcards.chrom}.{wildcards.hap} -m4G -@2 -o {output.asmBam}

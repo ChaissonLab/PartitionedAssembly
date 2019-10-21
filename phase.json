@@ -1,0 +1,6 @@
+{
+    "ref" : "/home/cmb-16/mjc/shared/references/hg38_noalts/hg38.no_alts.fasta",
+	  "sample": "HG00268",			
+    "bam" : "/home/cmb-16/nobackups/mjc/data_download/HG00268/HG00268.pbmm.bam",
+    "srvcf" : "/home/cmb-16/mjc/sample-datasets/WashUDiversity/Finnish/HG00268.IL.vcf.gz"
+}
