@@ -21,6 +21,9 @@ chroms = [l.split()[0] for l in faiFile ]
 wd="/staging/mjc/mchaisso/phasing"
 
 sample=config["sample"]
+
+shell.prefix("set +eu ")
+
 rule all:
     input:
         indexedVcf=sample+".wh.vcf.gz"
