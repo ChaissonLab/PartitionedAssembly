@@ -5,7 +5,7 @@
     "ref" : "/home/cmb-16/mjc/shared/references/hg38_noalts/indexes/lra/hg38.no_alts.fasta",
     "vcf" : "/home/cmb-16/mjc/projects/hgsvg/analysis/HG00514/Phasing/SH032.wgs.whatshap.strandseq-10X.20160704.phased-genotypes.vcf.gz",
 		"grid_large" : "sbatch --time=24:00:00 --partition=cmb",
-		"grid_manycore" : "sbatch --time=24:00:00 --partition=cmb",
+		"grid_manycore" : "sbatch --time=48:00:00 --partition=cmb",
 		"grid_medium" : "sbatch --time=24:00:00 --partition=cmb",
 		"grid_small" : "sbatch --time=4:00:00 --partition=cmb",
 		"grid_blat" : "sbatch --time=24:00:00 --partition=cmb",

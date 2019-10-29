@@ -177,7 +177,6 @@ fi
 
 arrow -j 16 --referenceFilename {input.asm} --noEvidenceConsensusCall lowercasereference -o {output.cons} {input.asmBam}
 fi
-rm -rf {input.asm}.*
 
 """
 
@@ -187,11 +186,19 @@ rule CombineChromosomes:
     output:
         combined="assembly.{hap}.consensus.fasta",
     resources:
+<<<<<<< HEAD
         threads=1,
         mem_gb=4
     params:
         allChroms=chroms,
         grid_opts=config["grid_small"]
+=======
+        mem_gb=4,
+        threads=1
+    params:
+        grid_opts=config["grid_medium"],
+        allChroms=chroms
+>>>>>>> cbb4a5f16ae1d27772216e429caca4a996b0e002
     shell:"""
 for chrom in {params.allChroms}; do 
   cat $chrom.{wildcards.hap}.assembly.consensus.fasta | awk -vchrom=$chrom '{{ if (substr($1,0,1) == ">") {{ print ">"chrom"/"substr($1,2); }} else {{ print;}} }}'
