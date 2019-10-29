@@ -186,8 +186,12 @@ rule CombineChromosomes:
         cons=expand("{chrom}.{{hap}}.assembly.consensus.fasta", chrom=chroms),
     output:
         combined="assembly.{hap}.consensus.fasta",
+    resources:
+        threads=1,
+        mem_gb=4
     params:
-        allChroms=chroms
+        allChroms=chroms,
+        grid_opts=config["grid_small"]
     shell:"""
 for chrom in {params.allChroms}; do 
   cat $chrom.{wildcards.hap}.assembly.consensus.fasta | awk -vchrom=$chrom '{{ if (substr($1,0,1) == ">") {{ print ">"chrom"/"substr($1,2); }} else {{ print;}} }}'

@@ -36,7 +36,8 @@ rule PhaseByChromosome:
     output:
         phasedChromosome=sample+".{chrom}.vcf"
     params:
-        ref=config["ref"]
+        ref=config["ref"],
+        grid_opts="sbatch -c 1 --mem=24G --time=12:00:00 -p cmb"
     shell:"""
 whatshap phase  {input.srVCF} {input.lrBam} --ignore-read-groups   --chromosome {wildcards.chrom} --reference {params.ref} -o /dev/stdout | egrep -w "^#|^{wildcards.chrom}" > {output.phasedChromosome}
 """
@@ -47,6 +48,8 @@ rule CombinePhasedChromosomes:
         chroms=expand(sample+".{chrom}.vcf", chrom=chroms)
     output:
         phasedGenome=sample+".wh.vcf"
+    params:
+        grid_opts="sbatch -c 1 --mem=2G --time=1:00:00 -p cmb"
     shell:"""
 grep "^#" {input.chroms[0]} > {output.phasedGenome}
 cat {input.chroms} | grep -v "^#" >> {output.phasedGenome}
@@ -58,6 +61,8 @@ rule IndexVCF:
         vcf="{input}.wh.vcf"
     output:
         gzvcf="{input}.wh.vcf.gz"
+    params:
+        grid_opts="sbatch -c 1 --mem=4G --time=1:00:00 -p cmb"
     shell:"""
 bgzip {input.vcf}
 tabix {input.vcf}.gz
