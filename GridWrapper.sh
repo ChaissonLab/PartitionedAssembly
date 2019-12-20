@@ -4,7 +4,8 @@
 if [ "$1" == "grid" ]; then
    shift
 	 echo $@
-	 $@
+   echo "GRID SUBMISSION"
+	 $@ 
 fi
 
 if [ "$1" == "shell" ]; then
@@ -12,5 +13,6 @@ if [ "$1" == "shell" ]; then
 	 echo $@
 	 last_id=$#
    last_element=${@:last_id}
-   bash $last_element
+   echo "SHELL SUBMISSION " $last_element
+   sh $last_element &
 fi

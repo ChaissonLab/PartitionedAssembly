@@ -37,13 +37,17 @@ for chrom in allChroms:
 
 #shell.prefix("set +eu ")
 
+if config["assembler"] == "falcon":
+    localrules: AssembleFasta
+
+
 rule all:
     input:
- #       hapBams=expand(wd + "/{chrom}.{hap}.bam", chrom=chroms,hap=haps),
-#        convert_part=expand(wd + "/{chrom}.{hap}.bam.fasta", chrom=chroms,hap=haps),
+        hapBams=expand(wd + "/{chrom}.{hap}.bam", chrom=chroms,hap=haps),
+        convert_part=expand(wd + "/{chrom}.{hap}.bam.fasta", chrom=chroms,hap=haps),
 #        assemble_part=expand(wd + "/{chrom}.{hap}.assembly.fasta", chrom=chroms,hap=haps),
 #        assemble_remap=expand(wd + "/{chrom}.{hap}.assembly.fasta.bam", chrom=chroms,hap=haps),
-#        asmBam=expand(wd + "/{chrom}.{hap}.assembly.fasta.bam", chrom=chroms,hap=haps),
+        asmBam=expand(wd + "/{chrom}.{hap}.assembly.fasta.bam", chrom=chroms,hap=haps),
         cons=expand("{chrom}.{hap}.assembly.consensus.fasta", chrom=chroms,hap=haps),
         combined=expand("assembly.{hap}.consensus.fasta", hap=haps)
 
@@ -53,7 +57,7 @@ rule SplitBam:
         bam=config["bam"],
         vcf=config["vcf"]
     output:
-        hapBams=expand(wd + "/{{chrom}}.{hap}.bam", hap=haps),
+        hapBams=temp(expand(wd + "/{{chrom}}.{hap}.bam", hap=haps)),
 #        hapBams=temp(expand(wd + "/{{chrom}}.{hap}.bam", hap=haps)),
     resources:
         mem_gb=4,
@@ -88,11 +92,20 @@ samtools fasta {input.hapBam} -F 2304 > {output.hapFasta}
 def GetSubmission(method):
     if method == "falcon":
         # falcon jobs are a pipeline that needs to run locally
-        gridSubmit=SD + "/GridWrapper.sh shell " + config["grid_small"]
+        print("On Grid submit, using the shell " + method)
+        gridSubmit=SD + "/GridWrapper.sh shell "
     else:
+        print("On Grid submit, using the cluster " + method)
         # non-falcon run distributed
         gridSubmit=SD + "/GridWrapper.sh grid " + config["grid_large"]
     return gridSubmit
+
+
+def GetThreads(assembler):
+    if assembler == "falcon":
+        return 1
+    else:
+        return 16
 
 rule AssembleFasta:
     input:
@@ -102,10 +115,9 @@ rule AssembleFasta:
 #        asm=temp(wd + "/{chrom}.{hap}.raw_assembly.fasta")
     resources:
         mem_gb=lambda wildcards, attempt: (attempt+1)*16,
-        threads=16
+        threads=GetThreads(config["assembler"])
     params:
-        grid_opts=lambda wildcards: GetSubmission(config["assembler"]),
-        small=config["grid_small"],
+        grid_opts=config["grid_large"],
         ref=config["ref"],
         read_type=config["read-type"],
         assembler=config["assembler"],
@@ -114,25 +126,29 @@ rule AssembleFasta:
         node_constraint="",
 
     shell:"""
+mkdir -p asm_{wildcards.chrom}_{wildcards.hap}
 
+date > asm_{wildcards.chrom}_{wildcards.hap}/timestamp.start
 gs=`cat {params.ref}.fai | awk -vc={wildcards.chrom} '{{ if ($1 == c) print $2;}}'`
 if [ "{params.assembler}" == "wtdbg2" ]; then
-  if [ "{params.read_type}" == "CCS" ]; then
+  if [ "{params.read_type}" == "ccs" ]; then
      preset=ccs
   else
      preset=sq
   fi
 
-
-  /home/cmb-16/mjc/shared/software_packages/wtdbg2/wtdbg2 -x $preset -t 16 -g$gs  -i {input.hapFasta} -fo {output.asm} -L5000
-  /home/cmb-16/mjc/shared/software_packages/wtdbg2/wtpoa-cns -t 16 -i {output.asm}.ctg.lay.gz -o {output.asm}
+  cd asm_{wildcards.chrom}_{wildcards.hap} && \
+  /home/cmb-16/mjc/shared/software_packages/wtdbg2/wtdbg2 -x $preset -t 16 -g$gs  -i {input.hapFasta} -fo {output.asm} -L5000 && \
+  /home/cmb-16/mjc/shared/software_packages/wtdbg2/wtpoa-cns -t 16 -i {output.asm}.ctg.lay.gz -o {output.asm} && \\
+   rm {output.asm}.*
+  cd ..
 
   rm -f {output.asm}.*.gz {output.asm}.*.frg.*
 fi
 
 if [ "{params.assembler}" == "flye" ]; then
   
-  if [ "{params.read_type}" == "CCS" ]; then
+  if [ "{params.read_type}" == "ccs" ]; then
      readType="--pacbio-corr"
   else
      readType="--pacbio-raw"
@@ -155,14 +171,16 @@ if [ "{params.assembler}" == "falcon" ]; then
   wd=$PWD
   echo "second mkdir"
   mkdir -p asm_{wildcards.chrom}_{wildcards.hap}
-  cd asm_{wildcards.chrom}_{wildcards.hap}
-  echo {input.hapFasta} > input.fofn 
-  cp {params.sd}/falcon_cfg/cfg.$cfgVer.1 falcon.cfg
-  echo "genome_size = $gs" >> falcon.cfg
-  cat {params.sd}/falcon_cfg/cfg.$cfgVer.2 >> falcon.cfg
-  fc_run.py falcon.cfg
-  pwd
-  cp 2-asm-falcon/p_ctg.fasta {output.asm}
+  cd asm_{wildcards.chrom}_{wildcards.hap} && \
+  echo {input.hapFasta} > input.fofn  && \
+  cp {params.sd}/falcon_cfg/cfg.$cfgVer.1 falcon.cfg && \
+  echo "genome_size = $gs" >> falcon.cfg && \
+  cat {params.sd}/falcon_cfg/cfg.$cfgVer.2 >> falcon.cfg && \
+  fc_run.py falcon.cfg && \
+  cp 2-asm-falcon/p_ctg.fasta {output.asm} 
+  if [ -e {output.asm} ]; then 
+     rm -rf 0-rawreads 1-preads_ovl 2-asm-falcon
+  fi
 fi    
 
 if [ "{params.assembler}" == "canu" ]; then
@@ -183,6 +201,7 @@ if [ "{params.assembler}" == "canu" ]; then
   samtools faidx {output.asm}
 fi
 
+date > asm_{wildcards.chrom}_{wildcards.hap}/timestamp.end
 """
 
 rule RemapBam:
@@ -190,10 +209,10 @@ rule RemapBam:
         asm=wd + "/{chrom}.{hap}.raw_assembly.fasta",
         hapBam=wd + "/{chrom}.{hap}.bam"
     output:
-        asmBam=wd + "/{chrom}.{hap}.assembly.fasta.bam",
+        asmBam=temp(wd + "/{chrom}.{hap}.assembly.fasta.bam"),
 #        asmBam=temp(wd + "/{chrom}.{hap}.assembly.fasta.bam"),
     resources:
-        mem_gb=lambda wildcards, attempt: attempt*16,
+        mem_gb=lambda wildcards, attempt: attempt*16 + 8,
         threads=16
     params:
         grid_opts=config["grid_large"],
@@ -206,6 +225,12 @@ pbmm2 align {input.asm}.mmi {input.hapBam} -j 16 | samtools sort -T $TMPDIR/{wil
 pbindex {output.asmBam}
 samtools index {output.asmBam}
 """
+
+def GetConstraint(method):
+    if method == "racon":
+        return " --constraint=\"[E5-2640v3]\""
+    else:
+        return ""
 
 rule CallConsensus:
     input:
@@ -221,7 +246,7 @@ rule CallConsensus:
         grid_opts=config["grid_manycore"],
         consensus=config["consensus"],
         assembler=config["assembler"],
-        node_constraint=" --constraint=\"[E5-2640v3]\""
+        node_constraint=GetConstraint(config["consensus"])
     shell:"""
 set +e
 
@@ -241,6 +266,9 @@ else
 
   if [ ! -e {input.asmBam}.pbi ]; then 
       pbindex {input.asmBam}
+  fi
+  if [ ! -e {input.asm}.fai ]; then
+      samtools faidx {input.asm}
   fi
   arrow -j 16 --referenceFilename {input.asm} --noEvidenceConsensusCall lowercasereference -o {output.cons} {input.asmBam}
 fi
