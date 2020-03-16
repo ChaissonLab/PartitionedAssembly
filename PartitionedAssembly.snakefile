@@ -19,6 +19,7 @@ chroms = []
 allowedAssemblers = ["wtdbg2", "flye", "falcon", "canu"]
 allowedReadTypes= ["raw", "ccs", "ont"]
 
+
 if "read-type" not in config:
     config["read-type"] = "raw"
 elif config["read-type"] not in allowedReadTypes:
@@ -45,8 +46,8 @@ rule all:
     input:
         hapBams=expand(wd + "/{chrom}.{hap}.bam", chrom=chroms,hap=haps),
         convert_part=expand(wd + "/{chrom}.{hap}.bam.fasta", chrom=chroms,hap=haps),
-#        assemble_part=expand(wd + "/{chrom}.{hap}.assembly.fasta", chrom=chroms,hap=haps),
-#        assemble_remap=expand(wd + "/{chrom}.{hap}.assembly.fasta.bam", chrom=chroms,hap=haps),
+        assemble_part=expand(wd + "/{chrom}.{hap}.raw_assembly.fasta", chrom=chroms,hap=haps),
+        assemble_remap=expand(wd + "/{chrom}.{hap}.assembly.fasta.bam", chrom=chroms,hap=haps),
         asmBam=expand(wd + "/{chrom}.{hap}.assembly.fasta.bam", chrom=chroms,hap=haps),
         cons=expand("{chrom}.{hap}.assembly.consensus.fasta", chrom=chroms,hap=haps),
         combined=expand("assembly.{hap}.consensus.fasta", hap=haps)
@@ -61,7 +62,7 @@ rule SplitBam:
 #        hapBams=temp(expand(wd + "/{{chrom}}.{hap}.bam", hap=haps)),
     resources:
         mem_gb=4,
-        threads=14
+        threads=3
     params:
         grid_opts=config["grid_medium"],
         sd=SD,
@@ -70,6 +71,7 @@ rule SplitBam:
         ref=config["ref"],
         node_constraint=" "
     shell:"""
+mkdir -p  {params.wd}
 samtools merge - {input.bam} -R {wildcards.chrom} | samtools view -h - | {params.sd}/pbgreedyphase/partitionByPhasedSNVs  --sample {params.sample} --vcf {input.vcf} --sam=/dev/stdin --h1={output.hapBams[0]} --h2={output.hapBams[1]} --phaseStats={params.wd}/{wildcards.chrom}.phase_stats --ref={params.ref}
 """
 
@@ -80,13 +82,16 @@ rule MakeFasta:
 #        hapFasta=temp(wd + "/{chrom}.{hap}.bam.fasta")
         hapFasta=wd + "/{chrom}.{hap}.bam.fasta"
     params:
-        grid_opts=config["grid_small"],
-        node_constraint=""
+        grid_opts=config["grid_medium"],
+        node_constraint="",
+        sd=SD,
     resources:
-        mem_gb=1,
+        mem_gb=lambda wildcards, attempt: 20,
         threads=1
     shell:"""
-samtools fasta {input.hapBam} -F 2304 > {output.hapFasta}
+
+samtools fasta {input.hapBam} -F 2304 | {params.sd}/shuffleReads /dev/stdin {output.hapFasta} || true
+
 """
 
 def GetSubmission(method):
@@ -102,10 +107,20 @@ def GetSubmission(method):
 
 
 def GetThreads(assembler):
-    if assembler == "falcon":
+    if assembler == "falcon" or assembler == "canu":
         return 1
     else:
         return 16
+
+def GetMemGB(assembler, attempt):
+    if assembler=="falcon":
+        return 32
+    elif assembler == "flye":
+        return min(96, 64+16*(attempt-1))
+    elif assembler == "canu":
+        return 8
+    else:
+        return min(48,16*(attempt+1))
 
 rule AssembleFasta:
     input:
@@ -114,7 +129,7 @@ rule AssembleFasta:
         asm=wd + "/{chrom}.{hap}.raw_assembly.fasta"
 #        asm=temp(wd + "/{chrom}.{hap}.raw_assembly.fasta")
     resources:
-        mem_gb=lambda wildcards, attempt: (attempt+1)*16,
+        mem_gb=lambda wildcards, attempt: GetMemGB(config["assembler"], attempt),
         threads=GetThreads(config["assembler"])
     params:
         grid_opts=config["grid_large"],
@@ -124,11 +139,12 @@ rule AssembleFasta:
         working_directory=wd,
         sd=SD,
         node_constraint="",
-
+        partition=config["partition"]
     shell:"""
+mkdir -p  {params.working_directory}
 mkdir -p asm_{wildcards.chrom}_{wildcards.hap}
-
-date > asm_{wildcards.chrom}_{wildcards.hap}/timestamp.start
+cwd=`pwd`
+date > $cwd/asm_{wildcards.chrom}_{wildcards.hap}/timestamp.start
 gs=`cat {params.ref}.fai | awk -vc={wildcards.chrom} '{{ if ($1 == c) print $2;}}'`
 if [ "{params.assembler}" == "wtdbg2" ]; then
   if [ "{params.read_type}" == "ccs" ]; then
@@ -139,10 +155,9 @@ if [ "{params.assembler}" == "wtdbg2" ]; then
 
   cd asm_{wildcards.chrom}_{wildcards.hap} && \
   /home/cmb-16/mjc/shared/software_packages/wtdbg2/wtdbg2 -x $preset -t 16 -g$gs  -i {input.hapFasta} -fo {output.asm} -L5000 && \
-  /home/cmb-16/mjc/shared/software_packages/wtdbg2/wtpoa-cns -t 16 -i {output.asm}.ctg.lay.gz -o {output.asm} && \\
-   rm {output.asm}.*
-  cd ..
-
+  /home/cmb-16/mjc/shared/software_packages/wtdbg2/wtpoa-cns -t 16 -i {output.asm}.ctg.lay.gz -o {output.asm} && \
+   rm {output.asm}.* && \
+  cd .. && \
   rm -f {output.asm}.*.gz {output.asm}.*.frg.*
 fi
 
@@ -168,12 +183,19 @@ if [ "{params.assembler}" == "falcon" ]; then
   else
      cfgVer="raw"
   fi
+  fileName={input.hapFasta}
+  if [ "{params.read_type}" == "ont" ]; then
+    if [ ! -e {input.hapFasta}.ont.fasta ]; then
+       cat '{input.hapFasta}' | awk 'BEGIN {{ i=1; }} {{ if (substr($1,0,1) != ">") {{ l=length($1); print ">ont_run/"i"/1_"l; print $1; i+=1; }} }}' > {input.hapFasta}.ont.fasta
+    fi
+    fileName={input.hapFasta}.ont.fasta
+  fi
   wd=$PWD
-  echo "second mkdir"
+  echo "Running falcon assembly $cfgVer"
   mkdir -p asm_{wildcards.chrom}_{wildcards.hap}
   cd asm_{wildcards.chrom}_{wildcards.hap} && \
-  echo {input.hapFasta} > input.fofn  && \
-  cp {params.sd}/falcon_cfg/cfg.$cfgVer.1 falcon.cfg && \
+  echo $fileName > input.fofn  && \
+  cat {params.sd}/falcon_cfg/cfg.$cfgVer.1 | sed "s/PARTITION/{params.partition}/g" > falcon.cfg && \
   echo "genome_size = $gs" >> falcon.cfg && \
   cat {params.sd}/falcon_cfg/cfg.$cfgVer.2 >> falcon.cfg && \
   fc_run.py falcon.cfg && \
@@ -184,25 +206,45 @@ if [ "{params.assembler}" == "falcon" ]; then
 fi    
 
 if [ "{params.assembler}" == "canu" ]; then
+  
+  rm -f canu_asm_{wildcards.chrom}_{wildcards.hap}/status.txt
+  if [ ! -e canu_asm_{wildcards.chrom}_{wildcards.hap}/asm.contigs.fasta ]; then
   if [ "{params.read_type}" == "ccs" ]; then
-     /home/cmb-16/mjc/shared/software_packages/canu-1.9/Linux-amd64/bin/canu -p asm -d canu_asm_{wildcards.chrom}_{wildcards.hap} genomeSize=$gs correctedErrorRate=0.015 ovlMerThreshold=75 batOptions="-eg 0.01 -eM 0.01 -dg 6 -db 6 -dr 1 -ca 50 -cp 5" gridOptions="-p cmb --time=48:00:00" onSuccess={params.sd}/canu/OnSuccess.sh onFailure={params.sd}/canu/OnFailure.sh -pacbio-corrected {input.hapFasta} >& submit_canu_{wildcards.chrom}_{wildcards.hap}.txt 
+     /home/cmb-16/mjc/shared/software_packages/canu/Linux-amd64/bin/canu -p asm -d canu_asm_{wildcards.chrom}_{wildcards.hap} genomeSize=$gs correctedErrorRate=0.015 OvlMerThreshold=200 batOptions="-eg 0.01 -eM 0.01 -dg 6 -db 6 -dr 1 -ca 50 -cp 5" gridOptions="-p {params.partition} --time=48:00:00" onSuccess={params.sd}/canu/OnSuccess.sh onFailure={params.sd}/canu/OnFailure.sh -pacbio-hifi {input.hapFasta} >& submit_canu_{wildcards.chrom}_{wildcards.hap}.txt 
+  elif [ "{params.read_type}" == "raw" ]; then
+    /home/cmb-16/mjc/shared/software_packages/canu/Linux-amd64/bin/canu -p asm -d canu_asm_{wildcards.chrom}_{wildcards.hap}  genomeSize=$gs gridOptions=" -p {params.partition} --time=48:00:00 " OvlMerThreshold=200 onSuccess={params.sd}/canu/OnSuccess.sh onFailure={params.sd}/canu/OnFailure.sh -pacbio-raw {input.hapFasta} >& submit_canu_{wildcards.chrom}_{wildcards.hap}.txt 
   else
-    /home/cmb-16/mjc/shared/software_packages/canu-1.9/Linux-amd64/bin/canu -p asm -d canu_asm_{wildcards.chrom}_{wildcards.hap}  genomeSize=$gs gridOptions=" -p cmb --time=48:00:00 " onSuccess={params.sd}/canu/OnSuccess.sh onFailure={params.sd}/canu/OnFailure.sh -pacbio-raw {input.hapFasta} >& submit_canu_{wildcards.chrom}_{wildcards.hap}.txt
+     /home/cmb-16/mjc/shared/software_packages/canu/Linux-amd64/bin/canu -p asm -d canu_asm_{wildcards.chrom}_{wildcards.hap}  genomeSize=$gs gridOptions=" -p {params.partition} --time=48:00:00 " OvlMerThreshold=200 onSuccess={params.sd}/canu/OnSuccess.sh onFailure={params.sd}/canu/OnFailure.sh stopOnLowCoverage=7 -nanopore-raw {input.hapFasta} >& submit_canu_{wildcards.chrom}_{wildcards.hap}.txt 
   fi
-
+  
   while [ ! -e canu_asm_{wildcards.chrom}_{wildcards.hap}/status.txt ]; do
     sleep 60
+    jobid=`grep "Submitted batch job" submit_canu_{wildcards.chrom}_{wildcards.hap}.txt | awk '{{ print $4; }}'`
+    sacct -j $jobid | grep -q "FAILED"
+    status=$?
+    if [ $status -eq 0 ]; then
+       echo "failed" > canu_asm_{wildcards.chrom}_{wildcards.hap}/status.txt 
+    fi
   done
+  else
+    echo "success" > canu_asm_{wildcards.chrom}_{wildcards.hap}/status.txt
+  fi
   status=`cat canu_asm_{wildcards.chrom}_{wildcards.hap}/status.txt`;
   if [ "$status" != "success" ]; then
+    echo "Status wasn't success "
     exit 1
   fi  
-  mv canu_asm_{wildcards.chrom}_{wildcards.hap}/asm.contigs.fasta {output.asm}
+  echo "Made it to copy command."
+  cp $cwd/canu_asm_{wildcards.chrom}_{wildcards.hap}/asm.contigs.fasta {output.asm}
   samtools faidx {output.asm}
+  
 fi
 
-date > asm_{wildcards.chrom}_{wildcards.hap}/timestamp.end
+date > $cwd/asm_{wildcards.chrom}_{wildcards.hap}/timestamp.end
+exit 0
+
 """
+
 
 rule RemapBam:
     input:
@@ -212,17 +254,28 @@ rule RemapBam:
         asmBam=temp(wd + "/{chrom}.{hap}.assembly.fasta.bam"),
 #        asmBam=temp(wd + "/{chrom}.{hap}.assembly.fasta.bam"),
     resources:
-        mem_gb=lambda wildcards, attempt: attempt*16 + 8,
+        mem_gb=lambda wildcards, attempt: min(32,attempt*16 + 8),
         threads=16
     params:
         grid_opts=config["grid_large"],
-        node_constraint=""
+        readtype=config["read-type"],
+        node_constraint="--constraint=\"[E5-2640v3]\""
     shell:"""
 set +e
-. /home/cmb-16/mjc/mchaisso/projects/phasedsv_dev/phasedsv/dep/build/bin/activate pacbio
-pbmm2 index {input.asm} {input.asm}.mmi
-pbmm2 align {input.asm}.mmi {input.hapBam} -j 16 | samtools sort -T $TMPDIR/{wildcards.chrom}.{wildcards.hap} -m4G -@2 -o {output.asmBam}
-pbindex {output.asmBam}
+if [ "{params.readtype}" = "ont" ]; then
+  samtools fastq {input.hapBam} | minimap2 {input.asm} - -t 16 -a | samtools sort -T $TMPDIR/{wildcards.chrom}.{wildcards.hap} -m4G -@2 -o {output.asmBam}
+else
+   . /home/cmb-16/mjc/mchaisso/projects/phasedsv_dev/phasedsv/dep/build/bin/activate pacbio
+   pbmm2 index {input.asm} {input.asm}.mmi
+   pbmm2 align {input.asm}.mmi {input.hapBam} -j 16 | samtools sort -T $TMPDIR/{wildcards.chrom}.{wildcards.hap} -m4G -@2 -o {output.asmBam}
+   pbindex {output.asmBam}
+fi
+fs=`stat --printf="%s" {output.asmBam}`
+if [ $fs -lt 1000000 ]; then
+   rm {output.asmBam}
+   exit 1
+fi
+
 samtools index {output.asmBam}
 """
 
@@ -240,7 +293,7 @@ rule CallConsensus:
     output:
         cons="{chrom}.{hap}.assembly.consensus.fasta",
     resources:
-        mem_gb=lambda wildcards, attempt: attempt*16,
+        mem_gb=lambda wildcards, attempt: min(3,attempt)*16,
         threads=16
     params:
         grid_opts=config["grid_manycore"],
