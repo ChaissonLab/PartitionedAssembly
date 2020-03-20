@@ -165,8 +165,10 @@ if [ "{params.assembler}" == "flye" ]; then
   
   if [ "{params.read_type}" == "ccs" ]; then
      readType="--pacbio-corr"
-  else
+  elif ["{params.read_type"} == "raw" ]; then
      readType="--pacbio-raw"
+  else
+     readType="--nano-raw"
   fi
 
   
@@ -210,11 +212,11 @@ if [ "{params.assembler}" == "canu" ]; then
   rm -f canu_asm_{wildcards.chrom}_{wildcards.hap}/status.txt
   if [ ! -e canu_asm_{wildcards.chrom}_{wildcards.hap}/asm.contigs.fasta ]; then
   if [ "{params.read_type}" == "ccs" ]; then
-     /home/cmb-16/mjc/shared/software_packages/canu/Linux-amd64/bin/canu -p asm -d canu_asm_{wildcards.chrom}_{wildcards.hap} genomeSize=$gs correctedErrorRate=0.015 OvlMerThreshold=200 batOptions="-eg 0.01 -eM 0.01 -dg 6 -db 6 -dr 1 -ca 50 -cp 5" gridOptions="-p {params.partition} --time=48:00:00" onSuccess={params.sd}/canu/OnSuccess.sh onFailure={params.sd}/canu/OnFailure.sh -pacbio-hifi {input.hapFasta} >& submit_canu_{wildcards.chrom}_{wildcards.hap}.txt 
+     /home/cmb-16/mjc/shared/software_packages/canu/Linux-amd64/bin/canu -p asm -d canu_asm_{wildcards.chrom}_{wildcards.hap} genomeSize=$gs correctedErrorRate=0.015 OvlMerThreshold=200 batOptions="-eg 0.01 -eM 0.01 -dg 6 -db 6 -dr 1 -ca 50 -cp 5" gridOptions="-p {params.partition} --time=24:00:00" onSuccess={params.sd}/canu/OnSuccess.sh onFailure={params.sd}/canu/OnFailure.sh -pacbio-hifi {input.hapFasta} >& submit_canu_{wildcards.chrom}_{wildcards.hap}.txt 
   elif [ "{params.read_type}" == "raw" ]; then
-    /home/cmb-16/mjc/shared/software_packages/canu/Linux-amd64/bin/canu -p asm -d canu_asm_{wildcards.chrom}_{wildcards.hap}  genomeSize=$gs gridOptions=" -p {params.partition} --time=48:00:00 " OvlMerThreshold=200 onSuccess={params.sd}/canu/OnSuccess.sh onFailure={params.sd}/canu/OnFailure.sh -pacbio-raw {input.hapFasta} >& submit_canu_{wildcards.chrom}_{wildcards.hap}.txt 
+    /home/cmb-16/mjc/shared/software_packages/canu/Linux-amd64/bin/canu -p asm -d canu_asm_{wildcards.chrom}_{wildcards.hap}  genomeSize=$gs gridOptions=" -p {params.partition} --time=24:00:00 " OvlMerThreshold=200 onSuccess={params.sd}/canu/OnSuccess.sh onFailure={params.sd}/canu/OnFailure.sh -pacbio-raw {input.hapFasta} >& submit_canu_{wildcards.chrom}_{wildcards.hap}.txt 
   else
-     /home/cmb-16/mjc/shared/software_packages/canu/Linux-amd64/bin/canu -p asm -d canu_asm_{wildcards.chrom}_{wildcards.hap}  genomeSize=$gs gridOptions=" -p {params.partition} --time=48:00:00 " OvlMerThreshold=200 onSuccess={params.sd}/canu/OnSuccess.sh onFailure={params.sd}/canu/OnFailure.sh stopOnLowCoverage=7 -nanopore-raw {input.hapFasta} >& submit_canu_{wildcards.chrom}_{wildcards.hap}.txt 
+     /home/cmb-16/mjc/shared/software_packages/canu/Linux-amd64/bin/canu -p asm -d canu_asm_{wildcards.chrom}_{wildcards.hap}  genomeSize=$gs gridOptions=" -p {params.partition} --time=24:00:00 " OvlMerThreshold=200 onSuccess={params.sd}/canu/OnSuccess.sh onFailure={params.sd}/canu/OnFailure.sh stopOnLowCoverage=7 -nanopore-raw {input.hapFasta} >& submit_canu_{wildcards.chrom}_{wildcards.hap}.txt 
   fi
   
   while [ ! -e canu_asm_{wildcards.chrom}_{wildcards.hap}/status.txt ]; do
@@ -261,7 +263,7 @@ rule RemapBam:
         readtype=config["read-type"],
         node_constraint="--constraint=\"[E5-2640v3]\""
     shell:"""
-set +e
+
 if [ "{params.readtype}" = "ont" ]; then
   samtools fastq {input.hapBam} | minimap2 {input.asm} - -t 16 -a | samtools sort -T $TMPDIR/{wildcards.chrom}.{wildcards.hap} -m4G -@2 -o {output.asmBam}
 else
