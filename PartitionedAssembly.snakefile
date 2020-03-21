@@ -141,6 +141,7 @@ rule AssembleFasta:
         node_constraint="",
         partition=config["partition"]
     shell:"""
+set +eu
 mkdir -p  {params.working_directory}
 mkdir -p asm_{wildcards.chrom}_{wildcards.hap}
 cwd=`pwd`
@@ -165,17 +166,17 @@ if [ "{params.assembler}" == "flye" ]; then
   
   if [ "{params.read_type}" == "ccs" ]; then
      readType="--pacbio-corr"
-  elif ["{params.read_type"} == "raw" ]; then
+  elif ["{params.read_type}" == "raw" ]; then
      readType="--pacbio-raw"
   else
      readType="--nano-raw"
   fi
 
   
-. /home/cmb-16/mjc/mchaisso/projects/phasedsv_dev/phasedsv/dep/build/bin/activate python2
-echo "read type " $readType
-/home/cmb-16/mjc/mchaisso/software/Flye/bin/flye $readType {input.hapFasta} --genome-size $gs -o {params.working_directory}/{wildcards.chrom}.{wildcards.hap}  -t 16 -i 1
-mv {params.working_directory}/{wildcards.chrom}.{wildcards.hap}/assembly.fasta {output.asm}
+ conda activate py2
+#  echo "read type " $readType
+  /home/cmb-16/mjc/mchaisso/software/Flye/bin/flye $readType {input.hapFasta} --genome-size $gs -o {params.working_directory}/{wildcards.chrom}.{wildcards.hap}  -t 16 -i 1
+  mv {params.working_directory}/{wildcards.chrom}.{wildcards.hap}/assembly.fasta {output.asm}
 fi
 
 if [ "{params.assembler}" == "falcon" ]; then
@@ -267,7 +268,8 @@ rule RemapBam:
 if [ "{params.readtype}" = "ont" ]; then
   samtools fastq {input.hapBam} | minimap2 {input.asm} - -t 16 -a | samtools sort -T $TMPDIR/{wildcards.chrom}.{wildcards.hap} -m4G -@2 -o {output.asmBam}
 else
-   . /home/cmb-16/mjc/mchaisso/projects/phasedsv_dev/phasedsv/dep/build/bin/activate pacbio
+   eval $(conda shell.bash hook)
+   activate pacbio37
    pbmm2 index {input.asm} {input.asm}.mmi
    pbmm2 align {input.asm}.mmi {input.hapBam} -j 16 | samtools sort -T $TMPDIR/{wildcards.chrom}.{wildcards.hap} -m4G -@2 -o {output.asmBam}
    pbindex {output.asmBam}
