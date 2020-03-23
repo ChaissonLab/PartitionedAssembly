@@ -90,7 +90,7 @@ rule MakeFasta:
         threads=1
     shell:"""
 
-samtools fasta {input.hapBam} -F 2304 | {params.sd}/shuffleReads /dev/stdin {output.hapFasta} || true
+samtools fasta {input.hapBam} -F 2304 > {output.hapFasta} || true
 
 """
 
@@ -166,16 +166,16 @@ if [ "{params.assembler}" == "flye" ]; then
   
   if [ "{params.read_type}" == "ccs" ]; then
      readType="--pacbio-corr"
-  elif ["{params.read_type}" == "raw" ]; then
+  elif [ "{params.read_type}" == "raw" ]; then
      readType="--pacbio-raw"
   else
      readType="--nano-raw"
   fi
 
   
- conda activate py2
+#activate py2
 #  echo "read type " $readType
-  /home/cmb-16/mjc/mchaisso/software/Flye/bin/flye $readType {input.hapFasta} --genome-size $gs -o {params.working_directory}/{wildcards.chrom}.{wildcards.hap}  -t 16 -i 1
+  flye $readType {input.hapFasta} --genome-size $gs -o {params.working_directory}/{wildcards.chrom}.{wildcards.hap}  -t 16 -i 1
   mv {params.working_directory}/{wildcards.chrom}.{wildcards.hap}/assembly.fasta {output.asm}
 fi
 
@@ -268,8 +268,11 @@ rule RemapBam:
 if [ "{params.readtype}" = "ont" ]; then
   samtools fastq {input.hapBam} | minimap2 {input.asm} - -t 16 -a | samtools sort -T $TMPDIR/{wildcards.chrom}.{wildcards.hap} -m4G -@2 -o {output.asmBam}
 else
-   eval $(conda shell.bash hook)
+   which activate
+   deactivate
+   which pbmm2
    activate pacbio37
+   which pbmm2
    pbmm2 index {input.asm} {input.asm}.mmi
    pbmm2 align {input.asm}.mmi {input.hapBam} -j 16 | samtools sort -T $TMPDIR/{wildcards.chrom}.{wildcards.hap} -m4G -@2 -o {output.asmBam}
    pbindex {output.asmBam}
@@ -319,7 +322,7 @@ if [ "{params.consensus}" == "racon" ]; then
     /home/cmb-16/mjc/shared/software_packages/racon/build/bin/racon -t 16 {input.fasta} {input.asmBam}.sam.gz {input.asm} > {output.cons}
     true
 else
-  . /home/cmb-16/mjc/mchaisso/projects/phasedsv_dev/phasedsv/dep/build/bin/activate pacbio
+  activate pacbio37
 
   if [ ! -e {input.asmBam}.pbi ]; then 
       pbindex {input.asmBam}
