@@ -330,7 +330,7 @@ else
   if [ ! -e {input.asm}.fai ]; then
       samtools faidx {input.asm}
   fi
-  arrow -j 16 --referenceFilename {input.asm} --noEvidenceConsensusCall lowercasereference -o {output.cons} {input.asmBam}
+  gcpp {input.asmBam} -j 16 -r {input.asm} -o {output.cons} 
 fi
 
 """
