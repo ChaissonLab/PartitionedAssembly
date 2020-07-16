@@ -58,7 +58,7 @@ rule SplitBam:
         bam=config["bam"],
         vcf=config["vcf"]
     output:
-        hapBams=temp(expand(wd + "/{{chrom}}.{hap}.bam", hap=haps)),
+        hapBams=expand(wd + "/{{chrom}}.{hap}.bam", hap=haps),
 #        hapBams=temp(expand(wd + "/{{chrom}}.{hap}.bam", hap=haps)),
     resources:
         mem_gb=4,
@@ -126,7 +126,7 @@ rule AssembleFasta:
     input:
         hapFasta=wd + "/{chrom}.{hap}.bam.fasta"
     output:
-        asm=wd + "/{chrom}.{hap}.raw_assembly.fasta"
+        asm=protected(wd + "/{chrom}.{hap}.raw_assembly.fasta")
 #        asm=temp(wd + "/{chrom}.{hap}.raw_assembly.fasta")
     resources:
         mem_gb=lambda wildcards, attempt: GetMemGB(config["assembler"], attempt),
@@ -147,6 +147,13 @@ mkdir -p asm_{wildcards.chrom}_{wildcards.hap}
 cwd=`pwd`
 date > $cwd/asm_{wildcards.chrom}_{wildcards.hap}/timestamp.start
 gs=`cat {params.ref}.fai | awk -vc={wildcards.chrom} '{{ if ($1 == c) print $2;}}'`
+if [ -e "{output.asm}" ]; then
+  echo "{output.asm} already exists "
+  exit 0
+else 
+  echo "for some reason -e on {output.asm} is false"
+fi
+
 if [ "{params.assembler}" == "wtdbg2" ]; then
   if [ "{params.read_type}" == "ccs" ]; then
      preset=ccs
@@ -183,9 +190,12 @@ if [ "{params.assembler}" == "falcon" ]; then
 
   if [ "{params.read_type}" == "ccs" ]; then
      cfgVer="ccs"
+  elif [ "{params.read_type}" == "ont" ]; then
+     cfgVer="ont"  
   else
-     cfgVer="raw"
+     cfgVer="raw"  
   fi
+
   fileName={input.hapFasta}
   if [ "{params.read_type}" == "ont" ]; then
     if [ ! -e {input.hapFasta}.ont.fasta ]; then
@@ -254,7 +264,7 @@ rule RemapBam:
         asm=wd + "/{chrom}.{hap}.raw_assembly.fasta",
         hapBam=wd + "/{chrom}.{hap}.bam"
     output:
-        asmBam=temp(wd + "/{chrom}.{hap}.assembly.fasta.bam"),
+        asmBam=wd + "/{chrom}.{hap}.assembly.fasta.bam",
 #        asmBam=temp(wd + "/{chrom}.{hap}.assembly.fasta.bam"),
     resources:
         mem_gb=lambda wildcards, attempt: min(32,attempt*16 + 8),
@@ -267,10 +277,11 @@ rule RemapBam:
 
 if [ "{params.readtype}" = "ont" ]; then
   samtools fastq {input.hapBam} | minimap2 {input.asm} - -t 16 -a | samtools sort -T $TMPDIR/{wildcards.chrom}.{wildcards.hap} -m4G -@2 -o {output.asmBam}
+elif [ "{params.readtype}" == "ccs" ]; then
+  samtools fastq {input.hapBam} | minimap2 {input.asm} - -t 16 -a | samtools sort -T $TMPDIR/{wildcards.chrom}.{wildcards.hap} -m4G -@2 -o {output.asmBam}
 else
    which activate
    deactivate
-   which pbmm2
    activate pacbio37
    which pbmm2
    pbmm2 index {input.asm} {input.asm}.mmi
@@ -296,11 +307,12 @@ rule CallConsensus:
     input:
         asm=wd + "/{chrom}.{hap}.raw_assembly.fasta",
         asmBam=wd + "/{chrom}.{hap}.assembly.fasta.bam",
+        hapBam=wd + "/{chrom}.{hap}.bam",
         fasta=wd + "/{chrom}.{hap}.bam.fasta",
     output:
         cons="{chrom}.{hap}.assembly.consensus.fasta",
     resources:
-        mem_gb=lambda wildcards, attempt: min(3,attempt)*16,
+        mem_gb=lambda wildcards, attempt: min(3,attempt+1)*16,
         threads=16
     params:
         grid_opts=config["grid_manycore"],
@@ -314,12 +326,16 @@ if [ ! -e {input.asmBam}.bai ]; then
     samtools index {input.asmBam}
 fi
 if [ "{params.consensus}" == "racon" ]; then
-    if [ ! -e {input.asmBam}.sam.gz ]; then
-        samtools view -h {input.asmBam} | gzip -c > {input.asmBam}.sam.gz
+    if [ ! -e {input.hapBam}.fastq ]; then
+      samtools view -h -F 256 {input.hapBam} | samtools fastq - > {input.hapBam}.fastq
     fi
+    if [ ! -e {input.hapBam}.fastq.paf ]; then
+       minimap2 -t 16 {input.asm} {input.hapBam}.fastq > {input.hapBam}.fastq.paf
+    fi
+
     cat /proc/cpuinfo | grep sse4_1
     grep name /proc/cpuinfo
-    /home/cmb-16/mjc/shared/software_packages/racon/build/bin/racon -t 16 {input.fasta} {input.asmBam}.sam.gz {input.asm} > {output.cons}
+    /home/cmb-16/mjc/shared/software_packages/racon/build/bin/racon -t 16 {input.hapBam}.fastq {input.hapBam}.fastq.paf {input.asm} > {output.cons}
     true
 else
   activate pacbio37
